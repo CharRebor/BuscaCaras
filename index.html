@@ -476,6 +476,21 @@ async function loadModelFromBuffer(buffer) {
       graphOptimizationLevel: "all",
     });
     state.modelSession = session;
+
+    console.log("INPUT NAMES:", session.inputNames);
+  console.log("OUTPUT NAMES:", session.outputNames);
+
+  for (const name of session.inputNames) {
+    console.log("INPUT:", name, session.inputMetadata[name]);
+  }
+
+  for (const name of session.outputNames) {
+    console.log("OUTPUT:", name, session.outputMetadata[name]);
+  }
+
+
+
+  
     setStatus("Modelo listo", "ready");
     markStepDone(1);
     toast("Modelo cargado ✓");
