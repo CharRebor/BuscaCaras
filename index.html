@@ -636,6 +636,26 @@ async function runInference(canvas) {
     // buffalo_sc detection input name puede variar — probamos nombres comunes
     const inputName = session.inputNames[0];
     outputs = await session.run({ [inputName]: inputTensor });
+
+/////////////////////////////////////////////////
+    console.log("INPUTS:", session.inputNames);
+    console.log("OUTPUTS:", session.outputNames);
+
+    for (const name of session.outputNames) {
+       console.log(name, outputs[name].dims);
+    }
+
+  ////////////////////////////////////////////////
+
+
+
+
+
+
+
+
+
+    
   } catch (err) {
     console.warn("Inference error:", err);
     return [];
