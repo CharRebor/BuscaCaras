@@ -887,18 +887,26 @@ async function processFrame(timestamp) {
         : { id: null, name: "—", sim: 0 };
     }
 
-    // object-fit: cover → la imagen llena el área recortando los bordes
+    // object-fit: cover → el video llena TODO el área, se recortan los bordes
+    // El frame capturado tiene dimensiones reales del video (srcW x srcH)
+    // El display tiene dimensiones (dispW x dispH)
+    // cover escala el video para que NINGÚN borde quede vacío → el lado más pequeño en ratio manda
     const videoAR = srcW / srcH;
     const dispAR  = dispW / dispH;
     let renderW, renderH, offX, offY;
     if (videoAR > dispAR) {
-      // video más ancho → recorte lateral
-      renderH = dispH; renderW = dispH * videoAR;
-      offX = (dispW - renderW) / 2; offY = 0;
+      // video más ancho que el display → se recortan los lados del video
+      // el alto del render = dispH, el ancho del render > dispW
+      renderH = dispH;
+      renderW = dispH * videoAR;
+      offX = (dispW - renderW) / 2;  // negativo → recorte simétrico
+      offY = 0;
     } else {
-      // video más alto → recorte arriba/abajo
-      renderW = dispW; renderH = dispW / videoAR;
-      offX = 0; offY = (dispH - renderH) / 2;
+      // video más alto que el display → se recortan arriba/abajo del video
+      renderW = dispW;
+      renderH = dispW / videoAR;
+      offX = 0;
+      offY = (dispH - renderH) / 2;  // negativo → recorte simétrico
     }
     const scaleX = renderW / srcW;
     const scaleY = renderH / srcH;
@@ -1121,77 +1129,87 @@ async function processStaticImage(file) {
   setMode("image");
   setStatus("Procesando imagen...", "busy");
 
-  // Mostrar preview
-  const imgEl   = document.getElementById("image-preview");
-  const url      = URL.createObjectURL(file);
-  imgEl.src      = url;
-
-  // Esperar que cargue para conocer dimensiones reales
-  await new Promise(res => {
-    imgEl.onload = res;
-    imgEl.onerror = res;
-  });
-
-  // Dibujar imagen en canvas para extraer píxeles
-  const imgCanvas  = document.createElement("canvas");
-  imgCanvas.width  = imgEl.naturalWidth;
-  imgCanvas.height = imgEl.naturalHeight;
-  imgCanvas.getContext("2d").drawImage(imgEl, 0, 0);
+  // Cargar imagen como bitmap para evitar problemas de taint/CORS
+  const url = URL.createObjectURL(file);
 
   try {
+    // Crear imagen y esperar carga completa
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = rej;
+      i.src = url;
+    });
+
+    // Mostrar preview en el <img> del DOM
+    const imgEl = document.getElementById("image-preview");
+    imgEl.src = url;
+
+    // Dibujar en canvas offscreen para inferencia
+    const imgCanvas = document.createElement("canvas");
+    imgCanvas.width  = img.naturalWidth;
+    imgCanvas.height = img.naturalHeight;
+    imgCanvas.getContext("2d").drawImage(img, 0, 0);
+
+    // Esperar a que el image-wrap tenga dimensiones (puede estar recién visible)
+    await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
+
     const detections = await runInference(imgCanvas);
 
-    // Match
     for (const det of detections) {
       det.match = det.embedding
         ? matchEmbedding(det.embedding)
         : { id: null, name: "SIN EMBEDDING", sim: 0 };
     }
 
-    // Calcular coords en espacio visual (object-fit: contain)
+    // Calcular mapping de coords: inferencia (naturalWidth x naturalHeight) → visual
+    const wrapEl = document.getElementById("image-wrap");
+    const dispW  = wrapEl.clientWidth;
+    const dispH  = wrapEl.clientHeight;
+
     const overlayEl = document.getElementById("image-overlay");
-    const wrapEl    = document.getElementById("image-wrap");
-    const dispW = wrapEl.offsetWidth, dispH = wrapEl.offsetHeight;
     overlayEl.width  = dispW;
     overlayEl.height = dispH;
 
+    // object-fit: contain → letterbox
     const imgAR = imgCanvas.width / imgCanvas.height;
     const dAR   = dispW / dispH;
     let renderW, renderH, offX, offY;
     if (imgAR > dAR) {
+      // imagen más ancha → barras arriba y abajo
       renderW = dispW; renderH = dispW / imgAR;
       offX = 0; offY = (dispH - renderH) / 2;
     } else {
+      // imagen más alta → barras a los lados
       renderH = dispH; renderW = dispH * imgAR;
       offX = (dispW - renderW) / 2; offY = 0;
     }
+
     const scaleX = renderW / imgCanvas.width;
     const scaleY = renderH / imgCanvas.height;
 
     const scaledDets = detections.map(det => ({
       ...det,
-      box: [det.box[0]*scaleX+offX, det.box[1]*scaleY+offY,
-            det.box[2]*scaleX+offX, det.box[3]*scaleY+offY]
+      box: [
+        det.box[0]*scaleX + offX, det.box[1]*scaleY + offY,
+        det.box[2]*scaleX + offX, det.box[3]*scaleY + offY,
+      ]
     }));
 
     const ctx = overlayEl.getContext("2d");
-    drawAnnotations(ctx, scaledDets, overlayEl.width, overlayEl.height);
+    drawAnnotations(ctx, scaledDets, dispW, dispH);
     renderDetectionsPanel(detections);
 
     const n = detections.length;
-    setStatus(
-      n > 0
-        ? `${n} cara${n > 1 ? "s" : ""} en imagen`
-        : "Sin caras detectadas",
-      "ready"
-    );
+    setStatus(n > 0 ? `${n} cara${n>1?"s":""} en imagen` : "Sin caras detectadas", "ready");
 
   } catch (err) {
     console.error("Image inference error:", err);
-    setStatus("Error procesando imagen", "error");
+    setStatus("Error: " + err.message, "error");
+    URL.revokeObjectURL(url);  // solo liberar en error
   }
-
-  URL.revokeObjectURL(url);
+  // NO revocar url aquí — la imagen sigue mostrándose en el <img>
+  // Se libera cuando se cambia de modo o se carga otra imagen
 }
 
 // Botón IMAGEN
@@ -1202,8 +1220,13 @@ document.getElementById("btn-image").addEventListener("click", () => {
 document.getElementById("file-image").addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  // Reset para permitir seleccionar el mismo archivo de nuevo
   e.target.value = "";
+  // Liberar URL anterior si existe
+  const imgEl = document.getElementById("image-preview");
+  if (imgEl.src && imgEl.src.startsWith("blob:")) {
+    URL.revokeObjectURL(imgEl.src);
+    imgEl.src = "";
+  }
   await processStaticImage(file);
 });
 
