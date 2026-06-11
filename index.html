@@ -350,6 +350,10 @@ button:disabled { opacity: .35; cursor: default; }
     El índice requiere index.bin e index.json seleccionados juntos.<br>
     Todo queda en caché local para la próxima vez.
   </p>
+
+  <button id="btn-reset-cache" style="background:none;border:1px solid var(--border);color:var(--muted);font-size:11px;padding:6px 14px;border-radius:6px;flex:none;width:auto;margin-top:4px;">
+    🗑 Limpiar caché y recargar
+  </button>
 </div>
 
 <!-- MAIN APP -->
@@ -515,10 +519,20 @@ async function loadModelFromBuffer(buffer) {
   return loadModelBuffer(buffer, isRecog ? "w600k_mbf" : "det_500m");
 }
 
+async function clearOldCache() {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).delete("model_onnx");
+  } catch (_) {}
+}
+
 async function tryLoadCachedModel() {
   try {
     const detBuf   = await dbGet("model_det");
     const recogBuf = await dbGet("model_recog");
+    await clearOldCache();
+    if (!detBuf && !recogBuf) return false;
     if (detBuf)   await loadModelBuffer(detBuf,   "det_500m");
     if (recogBuf) await loadModelBuffer(recogBuf, "w600k_mbf");
     return !!state.modelSession;
@@ -1216,26 +1230,61 @@ threshRange.addEventListener("input", () => {
 });
 
 // ============================================================
+// RESET CACHÉ
+// ============================================================
+
+document.getElementById("btn-reset-cache").addEventListener("click", async () => {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).clear();
+    await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
+  } catch (_) {}
+  toast("Caché limpiado. Recargando...", 2000);
+  setTimeout(() => location.reload(), 1500);
+});
+
+// ============================================================
 // INIT — intentar cargar desde caché
 // ============================================================
 
 async function init() {
   setStatus("Verificando caché...", "busy");
 
-  const modelOk = await tryLoadCachedModel();
-  const indexOk = await tryLoadCachedIndex();
+  let modelOk = false, indexOk = false;
+  try {
+    modelOk = await tryLoadCachedModel();
+  } catch (err) {
+    console.warn("Cache model load failed:", err);
+    // Limpiar caché corrupto
+    try {
+      const db = await openDB();
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      tx.objectStore(STORE_NAME).delete("model_det");
+      tx.objectStore(STORE_NAME).delete("model_recog");
+      tx.objectStore(STORE_NAME).delete("model_onnx");
+    } catch (_) {}
+  }
+  try {
+    indexOk = await tryLoadCachedIndex();
+  } catch (err) {
+    console.warn("Cache index load failed:", err);
+  }
 
   if (modelOk && indexOk) {
-    // Todo cacheado — saltar setup
     document.getElementById("setup-overlay").style.display = "none";
     setStatus("Cargado desde caché", "ready");
     toast("Dataset y modelo cargados desde caché ✓");
     await startCamera();
   } else {
-    // Mostrar setup
     if (modelOk) markStepDone(1, "Modelo en caché");
     if (indexOk) markStepDone(2, `${state.numIdentities} identidades en caché`);
     setStatus("Configuración pendiente", "");
+    if (!modelOk && !indexOk) {
+      // Si hubo error de caché, mostrar sugerencia
+      document.getElementById("s1-desc").textContent =
+        "Si venías de una versión anterior, tocá 'Limpiar caché' abajo";
+    }
   }
 }
 
