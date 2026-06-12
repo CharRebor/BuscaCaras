@@ -744,7 +744,7 @@ async function runInference(canvas) {
   const bboxArrays  = [rawOut[oNames[3]].data, rawOut[oNames[4]].data, rawOut[oNames[5]].data];
   const strides     = [8, 16, 32];
 
-  const MIN_CONF   = 0.45;
+  const MIN_CONF   = 0.25; //lo bajo x diagnostico 0.45
   const MIN_FACE   = 20;   // px mínimo en espacio original
   const dets = [];
 
@@ -772,6 +772,14 @@ async function runInference(canvas) {
   }
 
   const detections = nms(dets, 0.45);
+
+  console.log(
+     "raw:",
+    dets.length,
+     "nms:",
+    detections.length
+  );
+  
 
   // ── Reconocimiento (w600k_mbf) ──
   if (state.recognSession) {
@@ -978,7 +986,7 @@ async function startCamera() {
 
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
-        facingMode: "user",
+        facingMode: "enviroment",
         width:  { ideal: 1280 },
         height: { ideal: 720 },
       },
