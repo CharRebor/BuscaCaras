@@ -362,6 +362,7 @@ button:disabled { opacity: .35; cursor: default; }
     <div id="status-dot"></div>
     <span id="status-text">Iniciando...</span>
     <h1>RECONOCIMIENTO</h1>
+    <span id="build-tag" style="font-size:9px;color:var(--muted);margin-left:6px;">v6</span>
   </div>
 
   <div id="video-wrap">
@@ -708,7 +709,12 @@ function nms(dets, thresh) {
       const iy = Math.max(0, Math.min(ay2,by2) - Math.max(ay1,by1));
       const inter = ix * iy;
       const bA = (bx2-bx1)*(by2-by1);
-      if (inter / (aA + bA - inter) > thresh) dead[j] = 1;
+      const iou = inter / (aA + bA - inter);
+      // IoU clásico, o solapamiento fuerte respecto a la caja más chica
+      // (frecuente cuando la misma cara es detectada por dos strides
+      // con cajas de tamaños muy distintos → IoU bajo pero misma cara)
+      const containment = inter / Math.min(aA, bA);
+      if (iou > thresh || containment > 0.7) dead[j] = 1;
     }
   }
   return keep;
@@ -916,6 +922,11 @@ async function processFrame(timestamp) {
     drawAnnotations(ctx, scaled, dispW, dispH);
     renderDetectionsPanel(detections);
     state.lastDets = detections;
+
+    console.log(`[debug] src=${srcW}x${srcH} disp=${dispW}x${dispH} render=${renderW.toFixed(0)}x${renderH.toFixed(0)} off=(${offX.toFixed(0)},${offY.toFixed(0)}) dets=${detections.length}`);
+    if (detections.length) {
+      console.log(`[debug] box0 src=[${detections[0].box.map(v=>v.toFixed(0))}] scaled=[${scaled[0].box.map(v=>v.toFixed(0))}]`);
+    }
 
     const n = detections.length;
     setStatus(n > 0 ? `${n} cara${n>1?"s":""} detectada${n>1?"s":""}` : "Sin detecciones", "ready");
@@ -1138,11 +1149,17 @@ async function processStaticImage(file) {
 
     setStatus("Decodificando imagen...", "busy");
 
-    // Cargar en el <img> visible y esperar a que decodifique
+    // Cargar en el <img> visible y esperar a que decodifique (con timeout de seguridad)
     await new Promise((resolve, reject) => {
-      imgEl.onload  = () => resolve();
-      imgEl.onerror = () => reject(new Error("Formato de imagen no soportado"));
+      const timer = setTimeout(() => reject(new Error("Timeout cargando imagen (10s)")), 10000);
+      imgEl.onload  = () => { clearTimeout(timer); resolve(); };
+      imgEl.onerror = () => { clearTimeout(timer); reject(new Error("Formato de imagen no soportado")); };
       imgEl.src = dataUrl;
+      // Si la imagen ya estaba decodificada (mismo src/cache), onload puede no disparar
+      if (imgEl.complete && imgEl.naturalWidth > 0) {
+        clearTimeout(timer);
+        resolve();
+      }
     });
 
     const natW = imgEl.naturalWidth, natH = imgEl.naturalHeight;
