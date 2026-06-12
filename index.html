@@ -891,11 +891,29 @@ async function processFrame(timestamp) {
   try {
     const detections = await runInference(srcCanvas);
 
+    
+
     for (const det of detections) {
-      det.match = det.embedding
-        ? matchEmbedding(det.embedding)
-        : { id: null, name: "—", sim: 0 };
+
+  const match = det.embedding
+    ? matchEmbedding(det.embedding)
+    : { id: null, name: "—", sim: 0 };
+
+  det.match = match;
+
+  if (det.embedding) {
+    console.log(
+      "BEST:",
+      match.name,
+      "SIM:",
+      match.sim.toFixed(4)
+     );
     }
+
+}
+
+
+    
 
     // object-fit: cover → el video llena TODO el área, se recortan los bordes
     // El frame capturado tiene dimensiones reales del video (srcW x srcH)
