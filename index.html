@@ -796,7 +796,17 @@ async function runInference(canvas) {
         for (let i = 0; i < 512; i++) norm += embData[i]*embData[i];
         norm = Math.sqrt(norm) || 1;
         det.embedding = Array.from(embData).map(v => v/norm);
-      } catch (_) {}
+      }  catch (err) {
+            console.error(
+           "Recognition error:",
+           err
+           );
+
+           toast(
+            "Recognition error: " + err.message,
+            6000
+          );
+        }
     }
   }
 
