@@ -754,15 +754,11 @@ async function runInference(canvas) {
       if (conf < MIN_CONF) continue;
 
       const ax = anchors[i*2],  ay = anchors[i*2+1];
-      const cx = ax + bboxes[i*4  ] * stride;
-      const cy = ay + bboxes[i*4+1] * stride;
-      const bw =      bboxes[i*4+2] * stride;
-      const bh =      bboxes[i*4+3] * stride;
-
-      const x1 = Math.max(0, (cx - bw/2) * scaleX);
-      const y1 = Math.max(0, (cy - bh/2) * scaleY);
-      const x2 = Math.min(W, (cx + bw/2) * scaleX);
-      const y2 = Math.min(H, (cy + bh/2) * scaleY);
+      // SCRFD bbox = [left, top, right, bottom] como distancias desde el anchor
+      const x1 = Math.max(0, (ax - bboxes[i*4  ] * stride) * scaleX);
+      const y1 = Math.max(0, (ay - bboxes[i*4+1] * stride) * scaleY);
+      const x2 = Math.min(W, (ax + bboxes[i*4+2] * stride) * scaleX);
+      const y2 = Math.min(H, (ay + bboxes[i*4+3] * stride) * scaleY);
 
       if ((x2-x1) < MIN_FACE || (y2-y1) < MIN_FACE) continue;
       dets.push({ box:[x1,y1,x2,y2], conf, embedding: null });
@@ -1129,29 +1125,25 @@ async function processStaticImage(file) {
   setMode("image");
   setStatus("Procesando imagen...", "busy");
 
-  // Cargar imagen como bitmap para evitar problemas de taint/CORS
+  const imgEl = document.getElementById("image-preview");
+  // Liberar blob URL anterior
+  if (imgEl.src && imgEl.src.startsWith("blob:")) URL.revokeObjectURL(imgEl.src);
+
   const url = URL.createObjectURL(file);
+  imgEl.src = url;
 
   try {
-    // Crear imagen y esperar carga completa
-    const img = await new Promise((res, rej) => {
-      const i = new Image();
-      i.onload = () => res(i);
-      i.onerror = rej;
-      i.src = url;
-    });
+    // createImageBitmap lee directo del File, evita tainted-canvas en móvil
+    const bitmap = await createImageBitmap(file);
+    const natW = bitmap.width, natH = bitmap.height;
 
-    // Mostrar preview en el <img> del DOM
-    const imgEl = document.getElementById("image-preview");
-    imgEl.src = url;
-
-    // Dibujar en canvas offscreen para inferencia
     const imgCanvas = document.createElement("canvas");
-    imgCanvas.width  = img.naturalWidth;
-    imgCanvas.height = img.naturalHeight;
-    imgCanvas.getContext("2d").drawImage(img, 0, 0);
+    imgCanvas.width  = natW;
+    imgCanvas.height = natH;
+    imgCanvas.getContext("2d").drawImage(bitmap, 0, 0);
+    bitmap.close();
 
-    // Esperar a que el image-wrap tenga dimensiones (puede estar recién visible)
+    // Esperar dos frames para que image-wrap tenga dimensiones reales
     await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
 
     const detections = await runInference(imgCanvas);
@@ -1162,31 +1154,26 @@ async function processStaticImage(file) {
         : { id: null, name: "SIN EMBEDDING", sim: 0 };
     }
 
-    // Calcular mapping de coords: inferencia (naturalWidth x naturalHeight) → visual
-    const wrapEl = document.getElementById("image-wrap");
-    const dispW  = wrapEl.clientWidth;
-    const dispH  = wrapEl.clientHeight;
-
+    const wrapEl    = document.getElementById("image-wrap");
     const overlayEl = document.getElementById("image-overlay");
+    const dispW = wrapEl.clientWidth;
+    const dispH = wrapEl.clientHeight;
     overlayEl.width  = dispW;
     overlayEl.height = dispH;
 
-    // object-fit: contain → letterbox
-    const imgAR = imgCanvas.width / imgCanvas.height;
+    // object-fit: contain → calcular área real renderizada con letterbox
+    const imgAR = natW / natH;
     const dAR   = dispW / dispH;
     let renderW, renderH, offX, offY;
     if (imgAR > dAR) {
-      // imagen más ancha → barras arriba y abajo
       renderW = dispW; renderH = dispW / imgAR;
       offX = 0; offY = (dispH - renderH) / 2;
     } else {
-      // imagen más alta → barras a los lados
       renderH = dispH; renderW = dispH * imgAR;
       offX = (dispW - renderW) / 2; offY = 0;
     }
-
-    const scaleX = renderW / imgCanvas.width;
-    const scaleY = renderH / imgCanvas.height;
+    const scaleX = renderW / natW;
+    const scaleY = renderH / natH;
 
     const scaledDets = detections.map(det => ({
       ...det,
@@ -1204,12 +1191,9 @@ async function processStaticImage(file) {
     setStatus(n > 0 ? `${n} cara${n>1?"s":""} en imagen` : "Sin caras detectadas", "ready");
 
   } catch (err) {
-    console.error("Image inference error:", err);
+    console.error("Image error:", err);
     setStatus("Error: " + err.message, "error");
-    URL.revokeObjectURL(url);  // solo liberar en error
   }
-  // NO revocar url aquí — la imagen sigue mostrándose en el <img>
-  // Se libera cuando se cambia de modo o se carga otra imagen
 }
 
 // Botón IMAGEN
@@ -1221,12 +1205,6 @@ document.getElementById("file-image").addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = "";
-  // Liberar URL anterior si existe
-  const imgEl = document.getElementById("image-preview");
-  if (imgEl.src && imgEl.src.startsWith("blob:")) {
-    URL.revokeObjectURL(imgEl.src);
-    imgEl.src = "";
-  }
   await processStaticImage(file);
 });
 
