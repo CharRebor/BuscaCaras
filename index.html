@@ -322,7 +322,7 @@ button:disabled { opacity: .35; cursor: default; }
     <div class="step-num" id="s1-num">1</div>
     <div class="step-body">
       <div class="step-title">Modelo ONNX</div>
-      <div class="step-desc" id="s1-desc">Seleccioná det_500m.onnx y w600k_mbf.onnx (ambos juntos)</div>
+      <div class="step-desc" id="s1-desc">Seleccioná detector y reconocedor ONNX(ambos juntos)</div>
     </div>
     <button class="step-btn" id="btn-setup-model">Cargar</button>
   </div>
@@ -346,7 +346,7 @@ button:disabled { opacity: .35; cursor: default; }
   </div>
 
   <p id="setup-note">
-    Cargá los dos modelos juntos (det_500m.onnx + w600k_mbf.onnx).<br>
+    Cargá los dos modelos juntos (det y reco).<br>
     El índice requiere index.bin e index.json seleccionados juntos.<br>
     Todo queda en caché local para la próxima vez.
   </p>
@@ -1003,7 +1003,7 @@ async function startCamera() {
 
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
-        facingMode: "enviroment",
+        facingMode: "environment",
         width:  { ideal: 1280 },
         height: { ideal: 720 },
       },
