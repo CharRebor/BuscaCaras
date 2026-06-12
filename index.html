@@ -902,7 +902,7 @@ async function processFrame(timestamp) {
   det.match = match;
 
   if (det.embedding) {
-    setStatus(
+    toast(
       `BEST: ${match.name}  SIM: ${match.sim.toFixed(4)}`,
       3000
     );
