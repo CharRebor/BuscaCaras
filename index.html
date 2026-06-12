@@ -902,13 +902,12 @@ async function processFrame(timestamp) {
   det.match = match;
 
   if (det.embedding) {
-    console.log(
-      "BEST:",
-      match.name,
-      "SIM:",
-      match.sim.toFixed(4)
-     );
-    }
+    setStatus(
+      `BEST: ${match.name}  SIM: ${match.sim.toFixed(4)}`,
+      "ready"
+    );
+  }
+
 
 }
 
