@@ -1123,27 +1123,40 @@ async function processStaticImage(file) {
   }
 
   setMode("image");
-  setStatus("Procesando imagen...", "busy");
+  setStatus("Leyendo archivo...", "busy");
 
   const imgEl = document.getElementById("image-preview");
-  // Liberar blob URL anterior
-  if (imgEl.src && imgEl.src.startsWith("blob:")) URL.revokeObjectURL(imgEl.src);
-
-  const url = URL.createObjectURL(file);
-  imgEl.src = url;
 
   try {
-    // createImageBitmap lee directo del File, evita tainted-canvas en móvil
-    const bitmap = await createImageBitmap(file);
-    const natW = bitmap.width, natH = bitmap.height;
+    // FileReader -> data URL: máxima compatibilidad en móvil (evita blob:/createImageBitmap)
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload  = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("No se pudo leer el archivo"));
+      reader.readAsDataURL(file);
+    });
 
+    setStatus("Decodificando imagen...", "busy");
+
+    // Cargar en el <img> visible y esperar a que decodifique
+    await new Promise((resolve, reject) => {
+      imgEl.onload  = () => resolve();
+      imgEl.onerror = () => reject(new Error("Formato de imagen no soportado"));
+      imgEl.src = dataUrl;
+    });
+
+    const natW = imgEl.naturalWidth, natH = imgEl.naturalHeight;
+    if (!natW || !natH) throw new Error("La imagen no tiene dimensiones válidas");
+
+    setStatus(`Imagen ${natW}×${natH} — detectando...`, "busy");
+
+    // Dibujar el <img> ya cargado en un canvas (data: URL nunca tainta el canvas)
     const imgCanvas = document.createElement("canvas");
     imgCanvas.width  = natW;
     imgCanvas.height = natH;
-    imgCanvas.getContext("2d").drawImage(bitmap, 0, 0);
-    bitmap.close();
+    imgCanvas.getContext("2d").drawImage(imgEl, 0, 0);
 
-    // Esperar dos frames para que image-wrap tenga dimensiones reales
+    // Esperar dos frames para que image-wrap tenga dimensiones reales de layout
     await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
 
     const detections = await runInference(imgCanvas);
@@ -1193,6 +1206,7 @@ async function processStaticImage(file) {
   } catch (err) {
     console.error("Image error:", err);
     setStatus("Error: " + err.message, "error");
+    toast("Error procesando imagen: " + err.message, 5000);
   }
 }
 
